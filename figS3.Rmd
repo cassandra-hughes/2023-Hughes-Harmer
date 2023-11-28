@@ -1,0 +1,406 @@
+---
+title: "Fig S3"
+author: "Cassandra"
+date: "8/21/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup}
+## for modeling
+library(lme4)
+library(lmerTest)
+## for qqmath to get QQ plot
+library(lattice)
+## for tidy to get p-values
+library(broom)
+## for Tukey testing and visualization 
+library(emmeans)
+library(multcomp)
+library(multcompView)
+
+## for graphing
+library(tidyverse)
+library(cowplot)
+theme_set(theme_cowplot())
+## for figure arrangement
+library(gridExtra)
+
+## for genotype manipulation
+library(glue)
+library(ggtext)
+```
+
+# B, R, R+B, DD Period Boxplots
+
+Compare period between genotypes in constant darkness, constant 10 uE red, constant 10 uE blue, and constant 10 uE red + blue light.
+
+## load data 
+
+```{r}
+# load B, R, R+B data
+rhythmicity <- read_csv("Dull_FRRC_rhythmicity_quint.csv")
+
+# assign reps by experiment
+rhythmicity <- rhythmicity %>% mutate(
+  rep = as_factor(case_when(
+    Experiment == "Dull617" | 
+      Experiment == "Dull619" |
+      Experiment == "Dull620" |
+      Experiment == "Dull621" |
+      Experiment == "Dull625" ~ "1",
+    Experiment == "Dull622" |
+      Experiment == "Dull624" |
+      Experiment == "Dull626" ~ "2",
+    Experiment == "Dull632" | 
+      Experiment == "Dull633" |
+      Experiment == "Dull634" ~ "3")))
+
+summary(rhythmicity$rep)
+```
+
+```{r}
+# load dark data 
+dark <- read_csv("Dull_DD_rhythmicity_quint.csv")
+
+# add condition and intensity columns
+dark <- dark %>% mutate(
+  Condition = as_factor("DD"),
+  Intensity = 0
+)
+
+# assign reps by experiment
+dark <- dark %>% mutate(
+  rep = as_factor(case_when(
+    Experiment == "Dull603" ~ "1",
+    Experiment == "Dull606" ~ "2",
+    Experiment == "Dull607" ~ "3")))
+  
+summary(dark$rep)
+```
+
+## format data 
+
+```{r}
+# join together
+all <- full_join(rhythmicity, dark)
+
+# change factors 
+all <- all %>% mutate(
+  Experiment = as_factor(Experiment),
+  Genotype = as_factor(Genotype),
+  Condition = as_factor(Condition),
+  RAE_class = as_factor(case_when(RAE <= 0.6 ~ "RAE < 0.6",
+                        RAE > 0.6 ~ "RAE > 0.6",
+                        is.na(RAE) ~ "none")))
+
+summary(all)
+```
+
+```{r}
+# order RAE_class
+all$RAE_class = as_factor(all$RAE_class) %>% 
+  ordered(levels = c("none", "RAE > 0.6", "RAE < 0.6"))
+
+summary(all)
+```
+
+```{r}
+# filter for only rhythmic plants
+supp3 <- all %>%
+  filter(Intensity == 10 | Condition %in% c("DD")) %>% 
+  filter(RAE <= 0.6) %>% 
+  droplevels()
+
+# change light values for better labels
+supp3 <- supp3 %>% 
+  mutate(light = as_factor(case_when(
+    Condition == "cB" ~ "Blue",
+    Condition == "cR" ~ "Red",
+    Condition == "cR+cB" ~ "Red + Blue",
+    Condition == "DD" ~ "Dark")))
+
+# order light values to match fig 1 layout
+supp3$light = as_factor(supp3$light) %>% 
+  ordered(levels = c("Dark", "Red",
+                     "Red + Blue", "Blue"))
+
+summary(supp3)
+```
+
+## italicize genotypes 
+
+**Set up italicized genotype labels.**   
+
+```{r}
+supp3_styled <- supp3 %>% mutate(
+  gt = as_factor(ifelse(Genotype == "Col", "Col",
+                        ifelse(Genotype == "cca1 lhy-100 rve468", 
+                               "<i>cca1<br>lhy<br>rve468-12</i>",
+                               ifelse(Genotype == "cca1 lhy-100",
+                                      "<i>cca1<br>lhy</i>",
+                                      glue("<i>{Genotype}-11</i>"))))))
+
+# order styled genotypes 
+supp3_styled$gt = as_factor(supp3_styled$gt) %>% 
+  ordered(levels = c("Col", "<i>rve468-11</i>", 
+                     "<i>cca1<br>lhy</i>", 
+                     "<i>cca1<br>lhy<br>rve468-12</i>"))
+summary(supp3_styled$gt)
+```
+
+## set aesthetic scales
+
+Set shapes by genotype. 
+
+```{r}
+quint_shapes <- c("Col" = 16, "<i>rve468-11</i>" = 1,
+                        "<i>cca1<br>lhy</i>" = 17, 
+                        "<i>cca1<br>lhy<br>rve468-12</i>" = 2)
+```
+
+Set colors by genotype with allele differentiation. 
+
+```{r}
+quint_style_colors <- c("Col" = "#1F78B4", "<i>rve468-11</i>" = "#1B9E77",
+                        "<i>cca1<br>lhy</i>" = "#E31A1C", 
+                        "<i>cca1<br>lhy<br>rve468-12</i>" = "#6A3D9A")
+```
+
+## initial boxplot 
+
+```{r fig.height = 5, fig.width = 7}
+# all reps together
+supp3_styled %>% 
+  filter(RAE <= 0.6) %>%
+  ggplot(aes(gt, Period)) + 
+  geom_boxplot(outlier.size = -1) + 
+  geom_point(aes(color = gt), alpha = 0.8, position = position_jitterdodge()) +
+  facet_wrap(~ light) + 
+  scale_color_manual(values = quint_style_colors) + 
+  theme(axis.text.x = element_markdown(),
+        axis.title.x = element_blank(),
+        legend.position = "none")
+```
+
+## stats with lmerTest
+
+Want to examine period ~ genotype. Include experiment or rep as a random effect.  
+
+### check models
+
+```{r fig.show = "hold", out.width = "50%"}
+# pull out all conditions that need subsetting (light works for this)
+conditions <- unique(supp3_styled$light)
+conditions
+
+# run loop over all quality and intensity subsets
+for (i in 1:length(conditions)){
+  # subset df
+  df <- supp3_styled[supp3_styled$light == conditions[i],]
+  # create model 
+  model <- lmer(Period ~ Genotype + (1|rep), data = df)
+  # set the figures side by side 
+  par(mfrow=c(1,2))
+  # plot normality of residuals
+  print(qqmath(model, main = as.character(conditions[i])))
+  # plot equality of variances
+  print(plot(model,
+       sqrt(abs(resid(.)))~fitted(.),
+     type=c("p","smooth"), col.line=1,
+     main = as.character(conditions[i])))
+}
+```
+
+**Normality is okay but not great. Red + Blue variance looks okay.**
+
+### ANOVA
+
+```{r}
+# create results data frame
+aov_res <- data.frame(matrix(NA, 
+                             nrow = length(1:length(conditions)),
+                             ncol = 8))
+# assign column names to match tidied Tukey output
+colnames(aov_res) <- c("light", "term", "sumsq", "meansq", 
+                       "NumDF", "DenDF", "statistic", "p.value")
+
+# run loop over all light subsets
+for (i in 1:length(conditions)){
+  # subset df
+  df <- supp3_styled[supp3_styled$light == conditions[i],]
+  # create model 
+  model <- lmer(Period ~ Genotype + (1|rep), data = df)
+  # specify condition value in results
+  aov_res$light[i] <- as.character(conditions[i])
+  # run anova
+  aov <- anova(model)
+  # tidy anova into tibble
+  tidied <- tidy(aov)
+  # assign tidied variables into results data frame
+  aov_res$term[i] <- tidied$term
+  aov_res$sumsq[i] <- tidied$sumsq
+  aov_res$meansq[i] <- tidied$meansq
+  aov_res$NumDF[i] <- tidied$NumDF
+  aov_res$DenDF[i] <- tidied$DenDF
+  aov_res$statistic[i] <- tidied$statistic
+  aov_res$p.value[i] <- tidied$p.value
+}
+
+aov_res %>% 
+  select(!c("sumsq":"DenDF")) %>% 
+  arrange(light)
+```
+
+**Significant difference in genotype for all of these (Dark, 10B, 10R, 10R+B).**
+
+### Tukey
+
+```{r}
+# run loop over all light subsets
+for (i in 1:length(conditions)){
+  # subset df
+  df <- supp3_styled[supp3_styled$light == conditions[i],]
+  # create model 
+  model <- lmer(Period ~ Genotype + (1|rep), data = df)
+  # run emmeans 
+  emm <- emmeans(model, ~ Genotype)
+  # add line of space between results + label condition of tested subset
+  cat(paste("", 
+            as.character(conditions[i]),
+            "", sep = "\n"))
+  # print Tukey results in table
+  print(pwpm(emm, diffs = FALSE))
+}
+```
+
+### convert Tukey results into letter groups
+
+Want to know which groups are significantly different from each other, and which groups are not significantly different. 
+
+```{r}
+# create results data frame
+tukey_res <- data.frame(matrix(NA, 
+                               nrow = length(1:(length(conditions)*4)),
+                               ncol = 8))
+# assign column names to match output
+colnames(tukey_res) <- c("light", "Genotype", "emmean", "SE", 
+                         "df", "lower.CL", "upper.CL", ".group")
+
+# run loop over all light subsets
+for (i in 1:length(conditions)){
+  # subset df
+  df <- supp3_styled[supp3_styled$light == conditions[i],]
+  # create model 
+  model <- lmer(Period ~ Genotype + (1|rep), data = df)
+  # run emmeans 
+  emm <- emmeans(model, ~ Genotype)
+  # assign groups  
+  res <- cld(emm, level = 0.95, Letters = letters)
+  for (j in 1:4){
+    # set row number based on i and j
+    x <- (4*(i-1)) + j
+    # specify condition value in results 
+    tukey_res$light[x] <- as.character(conditions[i])
+    #assign variables into results data frame
+    tukey_res$Genotype[x] <- as.character(res$Genotype[j])
+    tukey_res$emmean[x] <- res$emmean[j]
+    tukey_res$SE[x] <- res$SE[j]
+    tukey_res$df[x] <- res$df[j]
+    tukey_res$lower.CL[x] <- res$lower.CL[j]
+    tukey_res$upper.CL[x] <- res$upper.CL[j]
+    tukey_res$.group[x] <- res$.group[j]
+  }
+}
+
+head(tukey_res)
+
+# adjust letter format to plot
+tukey_res <- tukey_res %>% 
+  mutate(
+    light = as_factor(light),
+    Genotype = as_factor(Genotype),
+    group = sapply(.group, str_remove_all, " "))
+
+# view results
+tukey_res %>% 
+  select(!c(df:upper.CL))
+```
+
+## format data 
+
+Calculate the maximum data point for each condition and genotype so that Tukey test lettering is displayed at the appropriate position.  
+
+```{r}
+# calculate max period for each gt and condition
+max_per <- supp3_styled %>% group_by(light, Genotype) %>% 
+  summarise(max_per = max(Period))
+
+# order light in Tukey results for joining
+tukey_res$light = as_factor(tukey_res$light) %>% 
+  ordered(levels = c("Dark", "Red", "Red + Blue", "Blue"))
+
+# join max period into the Tukey results 
+(tukey_res <- full_join(tukey_res, max_per))
+```
+
+## italicize genotypes in Tukey data frame
+
+```{r}
+# set up italicized genotypes
+tukey_res_styled <- tukey_res %>% mutate(
+  gt = as_factor(ifelse(Genotype == "Col", "Col",
+                       ifelse(Genotype == "cca1 lhy-100 rve468", "<i>cca1<br>lhy<br>rve468-12</i>",
+                       ifelse(Genotype == "cca1 lhy-100", "<i>cca1<br>lhy</i>",
+                    glue("<i>{Genotype}-11</i>"))))))
+
+# order styled genotypes 
+tukey_res_styled$gt = as_factor(tukey_res_styled$gt) %>% 
+  ordered(levels = c("Col", "<i>rve468-11</i>", 
+                     "<i>cca1<br>lhy</i>", 
+                     "<i>cca1<br>lhy<br>rve468-12</i>"))
+summary(tukey_res_styled)
+```
+
+
+## final boxplot 
+
+```{r}
+# size specifications
+point_size = 2
+point_alpha = 0.8
+axis_text_size = 14
+axis_title_size = 16
+facet_label_size = 16
+cld_size = 5
+```
+
+```{r fig.height = 5, fig.width = 9}
+# save supp fig3 to pdf
+#pdf("supp3.pdf", width = 9, height = 5, bg = "white")
+
+# all reps together
+supp3_styled %>% 
+  ggplot(aes(gt, Period)) + 
+  geom_boxplot(outlier.size = -1) + 
+  geom_point(aes(color = gt, shape = gt), 
+             alpha = point_alpha, size = point_size,
+             position = position_jitterdodge()) +
+  geom_text(data = tukey_res_styled, aes(x = gt, y = (max_per + 3.5),
+                                         label = group),
+            color = "black", size = cld_size, show.legend = FALSE) + 
+  facet_wrap(~ light) + 
+  scale_y_continuous(limits = c(13, 39), breaks = c(seq(15, 35, 5))) + 
+  background_grid(major = 'y', minor = "none")  +
+  scale_colour_manual(values = quint_style_colors) + 
+  scale_shape_manual(values = quint_shapes) + 
+  theme(axis.text.x = element_markdown(size = axis_text_size),
+        axis.title.x = element_blank(),
+        axis.text.y = element_text(size = axis_text_size),
+        axis.title.y = element_text(size = axis_title_size),
+        strip.text = element_text(size = facet_label_size),
+        legend.position = "none")
+
+#dev.off()
+```

@@ -1,0 +1,198 @@
+---
+title: "Fig S2"
+author: "Cassandra"
+date: "8/21/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup}
+## for graphing
+library(tidyverse)
+library(cowplot)
+theme_set(theme_cowplot())
+
+## for genotype manipulation
+library(glue)
+library(ggtext)
+```
+
+# B, R, R+B FRRC
+
+Examine rhythmicity of genotypes in all tested fluence rates of blue, red, and red + blue light. 
+
+## load and format data 
+
+### initial formatting
+
+```{r}
+# load data
+rhythmicity <- read_csv("Dull_FRRC_rhythmicity_quint.csv")
+
+# change factors 
+rhythmicity <- rhythmicity %>% mutate(
+  Experiment = as_factor(Experiment),
+  Genotype = as_factor(Genotype),
+  Condition = as_factor(Condition),
+  RAE_class = as_factor(case_when(RAE <= 0.6 ~ "RAE < 0.6",
+                        RAE > 0.6 ~ "RAE > 0.6",
+                        is.na(RAE) ~ "none")))
+
+# order RAE_class
+rhythmicity$RAE_class = as_factor(rhythmicity$RAE_class) %>% 
+  ordered(levels = c("none", "RAE > 0.6", "RAE < 0.6"))
+
+summary(rhythmicity)
+```
+
+### summarize RAE class counts 
+
+Calculate the number of plants for each RAE class when grouped by Genotype, Condition, Intensity, and Experiment. Also calculate the total number of plants across the three RAE groups. 
+
+```{r}
+# group to get counts for each RAE class
+br_counts <- rhythmicity %>% group_by(Genotype, Condition, Intensity, RAE_class, Experiment) %>% 
+  summarise(class_total = n())
+
+# group to get total counts for each bar 
+br_total <- rhythmicity %>% group_by(Genotype, Condition, Intensity, Experiment) %>% 
+  summarise(n = n())
+
+# join, calculate percentage
+br_summary <- full_join(br_counts, br_total) %>% 
+  mutate(percentage = class_total/n*100) 
+
+summary(br_summary)
+head(br_summary)
+
+# average reps, calculate SD and SEM
+br_reps <- br_summary %>% group_by(Genotype, Condition, Intensity, RAE_class) %>% 
+  summarise(count = n(),
+            avg_percentage = mean(percentage),
+            sd = sd(percentage),
+            sem = sd / sqrt(count))
+
+summary(br_reps)
+
+# include all classes so that bars are equal sizes when graphed
+br_reps <- br_reps %>% complete(RAE_class)
+summary(br_reps)
+```
+
+```{r}
+# order RAE_class
+br_reps$RAE_class = as_factor(br_reps$RAE_class) %>% 
+  ordered(levels = c("RAE < 0.6", "RAE > 0.6", "none"))
+```
+
+### italicize genotypes 
+
+**Set up italicized genotype labels.**   
+
+```{r}
+# italicize genotypes
+br_reps_styled_tilt <- br_reps %>% mutate(
+  gt = as_factor(ifelse(Genotype == "Col", "Col",
+                        ifelse(Genotype == "cca1 lhy-100 rve468", 
+                               "<i>cca1 lhy rve468-12</i>",
+                               ifelse(Genotype == "cca1 lhy-100",
+                                      "<i>cca1 lhy</i>",
+                                      glue("<i>{Genotype}-11</i>"))))))
+
+summary(br_reps_styled_tilt)
+
+# order styled genotypes 
+br_reps_styled_tilt$gt = as_factor(br_reps_styled_tilt$gt) %>% 
+  ordered(levels = c("Col", "<i>rve468-11</i>", 
+                     "<i>cca1 lhy</i>", 
+                     "<i>cca1 lhy rve468-12</i>"))
+summary(br_reps_styled_tilt$gt)
+```
+
+### prepare facet labels
+
+```{r}
+# set up light as more clear labels of Condition
+br_reps_styled_tilt <- br_reps_styled_tilt %>% 
+  mutate(light = as_factor(case_when(
+    Condition == "cB" ~ "Blue",
+    Condition == "cR" ~ "Red",
+    Condition == "cR+cB" ~ "Red + Blue")))
+summary(br_reps_styled_tilt$light)
+```
+
+## check data 
+
+```{r}
+# check out rhythmicity of cca1 lhy rve468 
+br_reps_styled_tilt %>% 
+  filter(Genotype == "cca1 lhy-100 rve468") %>% 
+  filter(RAE_class == "RAE < 0.6")
+```
+
+### check seedling count for each rep
+
+```{r}
+# for supplementary figure 
+rhythmicity %>% 
+  group_by(Condition, Intensity, Experiment, Genotype) %>% 
+  tally() %>% 
+  print(n = 135)
+
+rhythmicity %>% 
+  group_by(Condition, Intensity, Experiment, Genotype) %>% 
+  tally() %>% 
+  summary()
+```
+
+All reps included. There are 3 reps for everything in cB. There are 3 reps for everything in cR except cca1 lhy at 1 uE and only 2 reps at 200 uE. There are 3 reps for everything in cR+cB except quint at 1 uE and 10 uE, and rve468 and cca1 lhy at 200 uE. 
+
+## create figure
+
+### bar graph with error bars
+
+```{r}
+# figure specifications
+facet_label_size <- 18
+axis_text_size = 16
+axis_title_size = 18
+legend_text_size <- 16
+legend_title_size <- 18
+legend_symbol_size <- unit(2, "line")
+point_size = 1.75
+point_alpha = 0.5
+point_stroke = 1
+errorbar_width <- 0.25
+errorbar_size <- 0.75
+```
+
+```{r fig.width = 14, fig.height = 8}
+# save to pdf 
+#pdf("supp2_bar_sem_tilt.pdf", width = 14, height = 8, bg = "white")
+
+br_reps_styled_tilt %>%  
+  ggplot(aes(gt, avg_percentage, fill = RAE_class)) +
+  geom_bar(position = position_dodge(), stat = "identity") +
+  facet_grid(light ~ Intensity) +
+  geom_errorbar(aes(ymin = avg_percentage - sem, 
+                    ymax = avg_percentage + sem),
+                width = errorbar_width, linewidth = errorbar_size,
+                position = position_dodge(0.9)) +
+  labs(y = "Percentage of Plants") + 
+  scale_fill_manual(values = c("none" = "firebrick2", 
+                               "RAE > 0.6" = "gold", 
+                               "RAE < 0.6" = "mediumblue"), name = "RAE") +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_markdown(size = axis_text_size, angle = 45, hjust = 1),
+        axis.title.y = element_text(size = axis_title_size),
+        axis.text.y = element_text(size = axis_text_size),
+        strip.text = element_text(size = facet_label_size),
+        legend.text = element_text(size = legend_text_size),
+        legend.title = element_text(size = legend_title_size),
+        legend.position = "top",
+        legend.justification = "center",
+        legend.key.size = legend_symbol_size)
+
+#dev.off()
+```

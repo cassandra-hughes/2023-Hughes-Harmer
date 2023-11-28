@@ -1,0 +1,30 @@
+﻿type,coordinates
+ORF,147-2565
+5' utr,1-146
+coding_region,147-340
+coding_region,957-1014
+coding_region,1108-1231
+coding_region,1315-1473
+coding_region,1583-1708
+coding_region,1787-1896
+coding_region,2214-2273
+coding_region,2515-2565
+exon,1-340
+intron,341-956
+exon,957-1014
+intron,1015-1107
+exon,1108-1231
+intron,1232-1314
+exon,1315-1473
+intron,1474-1582
+exon,1583-1708
+intron,1709-1786
+exon,1787-1896
+intron,1897-2213
+exon,2214-2273
+intron,2274-2514
+exon,2515-2639
+intron,2640-2958
+exon,2959-3332
+3' utr,2566-2639
+3' utr,2959-3332
